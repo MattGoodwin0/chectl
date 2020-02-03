@@ -33,7 +33,7 @@ export default class Delete extends Command {
     const notifier = require('node-notifier')
 
     const k8sTasks = new K8sTasks()
-    const helmTasks = new HelmTasks()
+    const helmTasks = new HelmTasks(flags)
     const msAddonTasks = new MinishiftAddonTasks()
     const operatorTasks = new OperatorTasks()
     const cheTasks = new CheTasks(flags)

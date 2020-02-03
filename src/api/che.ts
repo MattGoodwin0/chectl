@@ -8,11 +8,12 @@
  * SPDX-License-Identifier: EPL-2.0
  **********************************************************************/
 import { CoreV1Api, KubeConfig } from '@kubernetes/client-node'
-import axios from 'axios'
+import axios, { AxiosInstance } from 'axios'
 import * as cp from 'child_process'
 import { cli } from 'cli-ux'
 import * as commandExists from 'command-exists'
 import * as fs from 'fs-extra'
+import * as https from 'https'
 import * as yaml from 'js-yaml'
 import * as path from 'path'
 import { setInterval } from 'timers'
@@ -33,8 +34,17 @@ export class CheHelper {
   kube: KubeHelper
   oc = new OpenShiftHelper()
 
+  private readonly axios: AxiosInstance
+
   constructor(flags: any) {
     this.kube = new KubeHelper(flags)
+
+    // Make axios ignore untrusted certificate error for self-signed certificate case.
+    const httpsAgent = new https.Agent({ rejectUnauthorized: false })
+
+    this.axios = axios.create({
+      httpsAgent
+    })
   }
 
   /**
@@ -136,7 +146,7 @@ export class CheHelper {
     const endpoint = `${cheURL}/api/system/state`
     let response = null
     try {
-      response = await axios.get(endpoint, { timeout: responseTimeoutMs })
+      response = await this.axios.get(endpoint, { timeout: responseTimeoutMs })
     } catch (error) {
       throw this.getCheApiError(error, endpoint)
     }
@@ -151,7 +161,7 @@ export class CheHelper {
     const headers = accessToken ? { Authorization: `${accessToken}` } : null
     let response = null
     try {
-      response = await axios.post(endpoint, null, { headers, timeout: responseTimeoutMs })
+      response = await this.axios.post(endpoint, null, { headers, timeout: responseTimeoutMs })
     } catch (error) {
       if (error.response && error.response.status === 409) {
         return
@@ -177,19 +187,19 @@ export class CheHelper {
   }
 
   async isCheServerReady(cheURL: string, responseTimeoutMs = this.defaultCheResponseTimeoutMs): Promise<boolean> {
-    const id = await axios.interceptors.response.use(response => response, async (error: any) => {
+    const id = await this.axios.interceptors.response.use(response => response, async (error: any) => {
       if (error.config && error.response && (error.response.status === 404 || error.response.status === 503)) {
-        return axios.request(error.config)
+        return this.axios.request(error.config)
       }
       return Promise.reject(error)
     })
 
     try {
-      await axios.get(`${cheURL}/api/system/state`, { timeout: responseTimeoutMs })
-      await axios.interceptors.response.eject(id)
+      await this.axios.get(`${cheURL}/api/system/state`, { timeout: responseTimeoutMs })
+      await this.axios.interceptors.response.eject(id)
       return true
     } catch {
-      await axios.interceptors.response.eject(id)
+      await this.axios.interceptors.response.eject(id)
       return false
     }
   }
@@ -214,7 +224,7 @@ export class CheHelper {
         json.metadata.name = workspaceName
         devfile = yaml.dump(json)
       }
-      response = await axios.post(endpoint, devfile, { headers })
+      response = await this.axios.post(endpoint, devfile, { headers })
     } catch (error) {
       if (!devfile) { throw new Error(`E_NOT_FOUND_DEVFILE - ${devfilePath} - ${error.message}`) }
       if (error.response && error.response.status === 400) {
@@ -232,7 +242,7 @@ export class CheHelper {
 
   async parseDevfile(devfilePath = ''): Promise<string> {
     if (devfilePath.startsWith('http')) {
-      const response = await axios.get(devfilePath)
+      const response = await this.axios.get(devfilePath)
       return response.data
     } else {
       return fs.readFileSync(devfilePath, 'utf8')
@@ -254,7 +264,7 @@ export class CheHelper {
 
     try {
       let workspaceConfig = fs.readFileSync(workspaceConfigPath, 'utf8')
-      response = await axios.post(endpoint, workspaceConfig, { headers })
+      response = await this.axios.post(endpoint, workspaceConfig, { headers })
     } catch (error) {
       if (!workspaceConfig) { throw new Error(`E_NOT_FOUND_WORKSPACE_CONFIG_FILE - ${workspaceConfigPath} - ${error.message}`) }
       if (error.response && error.response.status === 400) {
@@ -274,7 +284,7 @@ export class CheHelper {
     const endpoint = `${cheURL}/api/keycloak/settings`
     let response = null
     try {
-      response = await axios.get(endpoint, { timeout: responseTimeoutMs })
+      response = await this.axios.get(endpoint, { timeout: responseTimeoutMs })
     } catch (error) {
       if (error.response && (error.response.status === 404 || error.response.status === 503)) {
         return false
